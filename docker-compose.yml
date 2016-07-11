@@ -1,0 +1,28 @@
+elasticsearch:
+  image: dcrbsltd/elasticsearch:5
+  command: elasticsearch -Des.network.host=0.0.0.0
+  ports:
+    - 9200:9200
+    - 9300:9300
+
+kibana:
+  image: dcrbsltd/kibana:5
+  links:
+    - elasticsearch
+  ports:
+    - 80:80
+    - 443:443
+
+logstash:
+  image: dcrbsltd/logstash:5
+  command: logstash -f /etc/logstash.conf
+  ports:
+    - 5000:5000
+  links:
+    - elasticsearch
+    - redis
+
+redis:
+  image: redis
+  ports:
+    - 6379:6379

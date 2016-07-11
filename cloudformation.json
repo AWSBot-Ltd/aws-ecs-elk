@@ -1,0 +1,934 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Creates an elasticsearch application.",
+    "Parameters": {
+        "AmiId": {
+          "Description": "The Amazon Machine Image Id for the EC2 Instance.",
+          "Default": "ami-ccd942bf",
+          "Type": "String"
+        },
+        "DesiredCapacity": {
+            "Description": "Desirered number of instances in the Elasticsearch auto-scaling group",
+            "Default": "3",
+            "Type": "Number",
+            "MinValue": "1",
+            "MaxValue": "5",
+            "ConstraintDescription": "Must be between 1 and 5"
+        },
+        "DNSDomain": {
+            "Description": "DNS Name for the Application",
+            "Type": "String"
+        },
+        "KeyName": {
+            "Description": "Name of an existing EC2 KeyPair to enable SSH access to the instances",
+            "Default": "elasticsearch",
+            "Type": "String",
+            "MinLength": "1",
+            "MaxLength": "64",
+            "AllowedPattern": "[-_ a-zA-Z0-9]*",
+            "ConstraintDescription": "can contain only alphanumeric characters, spaces, dashes and underscores."
+        },
+        "InstanceType": {
+            "Description": "ElasticsearchServer EC2 instance type",
+            "Type": "String",
+            "Default": "t2.medium",
+            "AllowedValues": [
+                "t2.micro",
+                "t2.small",
+                "t2.medium",
+                "m1.large",
+                "m1.xlarge",
+                "m2.xlarge",
+                "m2.2xlarge",
+                "m2.4xlarge",
+                "m3.large",
+                "m3.xlarge",
+                "m3.2xlarge",
+                "c1.medium",
+                "c1.xlarge",
+                "cc1.4xlarge",
+                "cc2.8xlarge",
+                "cg1.4xlarge",
+                "c3.large",
+                "c3.xlarge",
+                "c3.2xlarge",
+                "c3.4xlarge",
+                "c3.8xlarge"
+            ],
+            "ConstraintDescription": "must be a valid EC2 instance type."
+        },
+        "ContainerPort": {
+            "Description": "The application port",
+            "Default": "9200",
+            "Type": "String"
+        },
+        "NotificationEmail": {
+            "Description": "Email to send notifications to",
+            "Type": "String"
+        },
+        "Shards": {
+            "Description": "The number of Elasticsearch shards",
+            "Default": "5",
+            "Type": "String"
+        },
+        "Replicas": {
+            "Description": "The number of Elasticsearch replicas",
+            "Default": "1",
+            "Type": "String"
+        },
+        "SSHLocation": {
+            "Description": " The IP address range that can be used to SSH to the EC2 instances",
+            "Default": "0.0.0.0/0",
+            "Type": "String",
+            "MinLength": "9",
+            "MaxLength": "18",
+            "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+            "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+        },
+        "VpcId": {
+            "Description": "Virtual Private Cloud ID, e.g. vpc-3d1c175f",
+            "Type": "String"
+        }
+    },
+    "Conditions": {
+        "Is-EC2-VPC": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "eu-central-1"
+                    ]
+                },
+                {
+                    "Fn::Equals": [
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "cn-north-1"
+                    ]
+                }
+            ]
+        },
+        "Is-EC2-Classic": {
+            "Fn::Not": [
+                {
+                    "Condition": "Is-EC2-VPC"
+                }
+            ]
+        }
+    },
+    "Mappings": {
+        "AWSRegion2ESRegion": {
+            "us-east-1": {
+                "region": "us-east"
+            },
+            "us-west-1": {
+                "region": "us-west-1"
+            },
+            "us-west-2": {
+                "region": "us-west-2"
+            },
+            "eu-west-1": {
+                "region": "eu-west"
+            },
+            "ap-southeast-1": {
+                "region": "ap-southeast-1"
+            },
+            "ap-southeast-2": {
+                "region": "ap-southeast-2"
+            },
+            "ap-northeast-1": {
+                "region": "ap-northeast"
+            },
+            "eu-central-1": {
+                "region": "eu-central"
+            },
+            "sa-east-1": {
+                "region": "sa-east"
+            },
+            "cn-north-1": {
+                "region": "cn-north"
+            }
+        }
+    },
+    "Resources": {
+        "NotificationTopic": {
+            "Type": "AWS::SNS::Topic",
+            "Properties": {
+                "Subscription": [
+                    {
+                        "Endpoint": {
+                            "Ref": "NotificationEmail"
+                        },
+                        "Protocol": "email"
+                    }
+                ]
+            }
+        },
+        "ElasticsearchUser": {
+            "Type": "AWS::IAM::User",
+            "Properties": {
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "elasticsearch-user",
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Action": [
+                                      "autoscaling:Describe*",
+                                      "cloudformation:DescribeStacks",
+                                      "cloudformation:DescribeStackEvents",
+                                      "cloudformation:DescribeStackResource",
+                                      "cloudformation:DescribeStackResources",
+                                      "cloudformation:GetTemplate",
+                                      "cloudformation:List*",
+                                      "ec2:Describe*",
+                                      "elasticloadbalancing:Describe*",
+                                      "s3:Get*",
+                                      "s3:List*"
+                                    ],
+                                    "Effect": "Allow",
+                                    "Resource": [
+                                        "*"
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "AccessKey": {
+            "Type": "AWS::IAM::AccessKey",
+            "Properties": {
+                "UserName": {
+                    "Ref": "ElasticsearchUser"
+                }
+            }
+        },
+        "ECSServiceRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "ecs.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "ecs-service",
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "elasticloadbalancing:Describe*",
+                                        "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
+                                        "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
+                                        "ec2:Describe*",
+                                        "ec2:AuthorizeSecurityGroupIngress"
+                                    ],
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "EC2InstanceRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "ec2.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "ecs-service",
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "ecs:CreateCluster",
+                                        "ecs:RegisterContainerInstance",
+                                        "ecs:DeregisterContainerInstance",
+                                        "ecs:DiscoverPollEndpoint",
+                                        "ecs:Submit*",
+                                        "ecs:Poll"
+                                    ],
+                                    "Resource": "*"
+                                },
+                                {
+                                    "Action": [
+                                        "ec2:DescribeInstances"
+                                    ],
+                                    "Effect": "Allow",
+                                    "Resource": [
+                                        "*"
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "IamInstanceProfile": {
+            "Type": "AWS::IAM::InstanceProfile",
+            "Properties": {
+                "Path": "/",
+                "Roles": [
+                    {
+                        "Ref": "EC2InstanceRole"
+                    }
+                ]
+            }
+        },
+        "AutoScalingSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "UpdatePolicy": {
+                "AutoScalingRollingUpdate": {
+                    "MaxBatchSize": "3",
+                    "MinInstancesInService": "1",
+                    "PauseTime": "PT2M30S"
+                }
+            },
+            "Properties": {
+                "GroupDescription": "Enable SSH access",
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "9200",
+                        "ToPort": "9200",
+                        "SourceSecurityGroupOwnerId": {
+                            "Fn::GetAtt": [
+                                "ElasticLoadBalancer",
+                                "SourceSecurityGroup.OwnerAlias"
+                            ]
+                        },
+                        "SourceSecurityGroupName": {
+                            "Fn::GetAtt": [
+                                "ElasticLoadBalancer",
+                                "SourceSecurityGroup.GroupName"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "9300",
+                        "ToPort": "9400",
+                        "SourceSecurityGroupOwnerId": {
+                            "Fn::GetAtt": [
+                                "ElasticLoadBalancer",
+                                "SourceSecurityGroup.OwnerAlias"
+                            ]
+                        },
+                        "SourceSecurityGroupName": {
+                            "Fn::GetAtt": [
+                                "ElasticLoadBalancer",
+                                "SourceSecurityGroup.GroupName"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "22",
+                        "ToPort": "22",
+                        "CidrIp": {
+                            "Ref": "SSHLocation"
+                        }
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "9200",
+                        "ToPort": "9200",
+                        "CidrIp": {
+                            "Ref": "SSHLocation"
+                        }
+                    }
+                ]
+            }
+        },
+        "AutoScalingSecurityGroupIngress": {
+            "Type": "AWS::EC2::SecurityGroupIngress",
+            "Properties": {
+                "GroupName": { "Ref": "AutoScalingSecurityGroup" },
+                "IpProtocol": "tcp",
+                "FromPort": "0",
+                "ToPort": "65335",
+                "SourceSecurityGroupName": { "Ref": "AutoScalingSecurityGroup" }
+            }
+        },
+        "AutoScalingGroup": {
+            "Type": "AWS::AutoScaling::AutoScalingGroup",
+            "Properties": {
+                "AvailabilityZones": {
+                    "Fn::GetAZs": ""
+                },
+                "LaunchConfigurationName": {
+                    "Ref": "AutoScalingLaunchConfig"
+                },
+                "LoadBalancerNames": [
+                    {
+                        "Ref": "ElasticLoadBalancer"
+                    }
+                ],
+                "NotificationConfiguration": {
+                    "TopicARN": {
+                        "Ref": "NotificationTopic"
+                    },
+                    "NotificationTypes": [
+                        "autoscaling:EC2_INSTANCE_LAUNCH",
+                        "autoscaling:EC2_INSTANCE_LAUNCH_ERROR",
+                        "autoscaling:EC2_INSTANCE_TERMINATE",
+                        "autoscaling:EC2_INSTANCE_TERMINATE_ERROR"
+                    ]
+                },
+                "MinSize": "1",
+                "MaxSize": "3",
+                "DesiredCapacity": {
+                    "Ref": "DesiredCapacity"
+                },
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Join": [
+                                "",
+                                [
+                                    "elasticsearch.",
+                                    {
+                                        "Ref": "DNSDomain"
+                                    }
+                                ]
+                            ]
+                        },
+                        "PropagateAtLaunch": "true"
+                    }
+                ]
+            }
+        },
+        "AutoScalingLaunchConfig": {
+            "DependsOn": "ECSCluster",
+            "CreationPolicy": {
+                "ResourceSignal": {
+                    "Count": {
+                        "Ref": "DesiredCapacity"
+                    },
+                    "Timeout": "PT5M"
+                }
+            },
+            "Type": "AWS::AutoScaling::LaunchConfiguration",
+            "Metadata": {
+                "AWS::CloudFormation::Init": {
+                    "configSets": {
+                        "full_install": [
+                            "install_cfn",
+                            "ecs_config",
+                            "es_config"
+                        ]
+                    },
+                    "install_cfn": {
+                        "files": {
+                            "/etc/cfn/cfn-hup.conf": {
+                                "content": {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "interval=1\n",
+                                            "stack=",
+                                            {
+                                                "Ref": "AWS::StackId"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref": "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                },
+                                "mode": "000400",
+                                "owner": "root",
+                                "group": "root"
+                            },
+                            "/etc/cfn/hooks.d/cfn-auto-reloader.conf": {
+                                "content": {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.AutoScalingLaunchConfig.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=/opt/aws/bin/cfn-init -v",
+                                            " --stack ",
+                                            {
+                                                "Ref": "AWS::StackName"
+                                            },
+                                            " --resource AutoScalingLaunchConfig",
+                                            " --region ",
+                                            {
+                                                "Ref": "AWS::Region"
+                                            },
+                                            "\n",
+                                            "runas=root\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services": {
+                            "sysvinit": {
+                                "cfn-hup": {
+                                    "enabled": "true",
+                                    "ensureRunning": "true",
+                                    "files": [
+                                        "/etc/cfn/cfn-hup.conf",
+                                        "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "ecs_config": {
+                        "files": {
+                            "/etc/ecs/ecs.config": {
+                                "content": {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                            "ECS_CLUSTER=",
+                                            {
+                                                "Ref": "ECSCluster"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                },
+                                "mode": "000644",
+                                "owner": "root",
+                                "group": "root"
+                            }
+                        }
+                    },
+                    "es_config": {
+                        "files": {
+                            "/usr/share/elasticsearch/config/elasticsearch.yml": {
+                                "content": {
+                                    "Fn::Join": [
+                                        "",
+                                        [  
+                                          "cluster.name: ",
+                                          {
+                                              "Ref": "AWS::StackName"
+                                          },
+                                          "\n",
+                                          "index.number_of_shards: ",
+                                          {
+                                              "Ref": "Shards"
+                                          },
+                                          "\n",
+                                          "index.number_of_replicas: ",
+                                          {
+                                              "Ref": "Replicas"
+                                          },
+                                          "\n",
+                                          "cloud.aws.access_key: ",
+                                          {
+                                            "Ref": "AccessKey"
+                                          },
+                                          "\n",
+                                          "cloud.aws.secret_key: ",
+                                          {
+                                                  "Fn::GetAtt": [
+                                                      "AccessKey",
+                                                      "SecretAccessKey"
+                                                  ]
+                                          },
+                                          "\n",
+                                          "cloud.aws.region: ",
+                                          {
+                                              "Fn::FindInMap": [
+                                                  "AWSRegion2ESRegion",
+                                                  {
+                                                      "Ref": "AWS::Region"
+                                                  },
+                                                  "region"
+                                              ]
+                                          },
+                                          "\n",
+                                          "network.publish_host: _ec2:privateIp_\n",
+                                          "plugin.mandatory: cloud-aws\n",
+                                          "discovery.zen.ping.multicast.enabled: false\n",
+                                          "discovery.type: ec2\n",
+                                          "discovery.ec2.tag.aws:cloudformation:stack-name: ",
+                                          {
+                                              "Ref": "AWS::StackName"
+                                          },
+                                        "\n"
+                                        ]
+                                    ]
+                                },
+                                "mode": "000644",
+                                "owner": "root",
+                                "group": "root"
+                            },
+                            "/usr/share/elasticsearch/config/logging.yml": {
+                                "content": {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                          "es.logger.level: INFO\n",
+                                          "rootLogger: ${es.logger.level}, console\n",
+                                          "logger:\n",
+                                          "  # log action execution errors for easier debugging\n",
+                                          "  action: DEBUG\n",
+                                          "  # reduce the logging for aws, too much is logged under the default INFO\n",
+                                          "  com.amazonaws: DEBUG\n",
+                                          "appender:\n",
+                                          "  console:\n",
+                                          "    type: console\n",
+                                          "    layout:\n",
+                                          "      type: consolePattern\n",
+                                          "      conversionPattern: \"[%d{ISO8601}][%-5p][%-25c] %m%n\"\n",
+                                          "\n"
+                                        ]
+                                    ]
+                                },
+                                "mode": "000644",
+                                "owner": "root",
+                                "group": "root"
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties": {
+                "ImageId": {
+                    "Ref": "AmiId"
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "IamInstanceProfile": {
+                    "Ref": "IamInstanceProfile"
+                },
+                "SecurityGroups": [
+                    {
+                        "Ref": "AutoScalingSecurityGroup"
+                    }
+                ],
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "echo ECS_CLUSTER=",
+                                {
+                                    "Ref": "ECSCluster"
+                                },
+                                " >> /etc/ecs/ecs.config\n",
+                                "yum install -y aws-cfn-bootstrap\n",
+                                "/opt/aws/bin/cfn-init -v",
+                                " --stack ",
+                                {
+                                    "Ref": "AWS::StackId"
+                                },
+                                " --resource AutoScalingLaunchConfig",
+                                " --configsets full_install",
+                                " --region ",
+                                {
+                                    "Ref": "AWS::Region"
+                                },
+                                "\n",
+                                "/opt/aws/bin/cfn-signal -e $? ",
+                                " --stack ",
+                                {
+                                    "Ref": "AWS::StackId"
+                                },
+                                " --resource AutoScalingGroup",
+                                " --region ",
+                                {
+                                    "Ref": "AWS::Region"
+                                },
+                                "\n"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "ElasticLoadBalancer": {
+            "Type": "AWS::ElasticLoadBalancing::LoadBalancer",
+            "Properties": {
+                "ConnectionDrainingPolicy": {
+                    "Enabled": "true",
+                    "Timeout": "15"
+                },
+                "LoadBalancerName": "elasticsearch",
+                "AvailabilityZones": {
+                    "Fn::GetAZs": {
+                        "Ref": "AWS::Region"
+                    }
+                },
+                "HealthCheck": {
+                    "HealthyThreshold": "2",
+                    "Interval": "6",
+                    "Target": "HTTP:9200/",
+                    "Timeout": "3",
+                    "UnhealthyThreshold": "3"
+                },
+                "CrossZone": "true",
+                "Listeners": [
+                    {
+                        "InstancePort": "9200",
+                        "InstanceProtocol": "http",
+                        "LoadBalancerPort": "9200",
+                        "Protocol": "http"
+                    },
+                    {
+                        "InstancePort": "9300",
+                        "InstanceProtocol": "tcp",
+                        "LoadBalancerPort": "9300",
+                        "Protocol": "tcp"
+                    }
+                ],
+                "SecurityGroups": [
+                    {
+                        "Ref": "LoadBalancerSecurityGroup"
+                    }
+                ]
+                
+            }
+        },
+        "LoadBalancerSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VpcId"
+                },
+                "GroupDescription": "Enable HTTP access on port 9200 and TCP on range 9300-9400",
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "9200",
+                        "ToPort": "9200",
+                        "CidrIp": {
+                            "Ref": "SSHLocation"
+                        }
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "9300",
+                        "ToPort": "9400",
+                        "CidrIp": {
+                            "Ref": "SSHLocation"
+                        }
+                    }
+                ]
+            }
+        },
+        "ECSCluster": {
+            "Type": "AWS::ECS::Cluster"
+        },
+        "ECSTaskDefinition": {
+            "Type": "AWS::ECS::TaskDefinition",
+            "Properties": {
+                "ContainerDefinitions": [
+                    {
+                        "Name": "elasticsearch",
+                        "Image": "dcrbsltd/elasticsearch:1.7.1",
+                        "Essential": "true",
+                        "Cpu": "512",
+                        "Memory": "1024",
+                        "PortMappings": [
+                            {
+                                "ContainerPort": "9200",
+                                "HostPort": "9200"
+                            },
+                            {
+                                "ContainerPort": "9300",
+                                "HostPort": "9300"
+                            }
+                        ],
+                        "Environment": [
+                            {
+                                "Name": "AWS_REGION",
+                                "Value": {
+                                    "Fn::FindInMap": [
+                                        "AWSRegion2ESRegion",
+                                        {
+                                            "Ref": "AWS::Region"
+                                        },
+                                        "region"
+                                    ]
+                                }
+                            },
+                            {
+                                "Name": "AWS_ACCESS_KEY_ID",
+                                "Value": {
+                                    "Ref": "AccessKey"
+                                }
+                            },
+                            {
+                                "Name": "AWS_SECRET_ACCESS_KEY",
+                                "Value": {
+                                    "Fn::GetAtt": [
+                                        "AccessKey",
+                                        "SecretAccessKey"
+                                    ]
+                                }
+                            }
+                        ],
+                        "MountPoints": [
+                            {
+                                "ContainerPath": "/usr/share/elasticsearch/data",
+                                "SourceVolume": "data"
+                            },
+                            {
+                                "ContainerPath": "/usr/share/elasticsearch/config",
+                                "SourceVolume": "config",
+                                "ReadOnly": "true"
+                            }
+                        ]
+                    }
+                ],
+                "Volumes": [
+                    {
+                        "Name": "data",
+                        "Host": {
+                            "SourcePath": "/usr/share/elasticsearch/data"
+                        }
+                    },
+                    {
+                        "Name": "config",
+                        "Host": {
+                            "SourcePath": "/usr/share/elasticsearch/config"
+                        }
+                    }
+                ]
+            }
+        },
+        "ECSServiceDefinition": {
+            "DependsOn": "AutoScalingGroup",
+            "Type": "AWS::ECS::Service",
+            "Properties": {
+                "Cluster": {
+                    "Ref": "ECSCluster"
+                },
+                "DesiredCount": {
+                    "Ref": "DesiredCapacity"
+                },
+                "LoadBalancers": [
+                    {
+                        "ContainerName": "elasticsearch",
+                        "ContainerPort": "9200",
+                        "LoadBalancerName": {
+                            "Ref": "ElasticLoadBalancer"
+                        }
+                    }
+                ],
+                "Role": {
+                    "Ref": "ECSServiceRole"
+                },
+                "TaskDefinition": {
+                    "Ref": "ECSTaskDefinition"
+                }
+            }
+        },
+        "RecordSetGroup": {
+            "Type": "AWS::Route53::RecordSetGroup",
+            "Properties": {
+                "HostedZoneName": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            {
+                                "Ref": "DNSDomain"
+                            },
+                            "."
+                        ]
+                    ]
+                },
+                "Comment": "Elasticsearch application",
+                "RecordSets": [
+                    {
+                        "Name": {
+                            "Fn::Join": [
+                                "",
+                                [
+                                    "elasticsearch.",
+                                    {
+                                        "Ref": "DNSDomain"
+                                    },
+                                    "."
+                                ]
+                            ]
+                        },
+                        "Type": "A",
+                        "AliasTarget": {
+                            "DNSName": {
+                                "Fn::GetAtt": [
+                                    "ElasticLoadBalancer",
+                                    "DNSName"
+                                ]
+                            },
+                            "EvaluateTargetHealth": "true",
+                            "HostedZoneId": {
+                                "Fn::GetAtt": [
+                                    "ElasticLoadBalancer",
+                                    "CanonicalHostedZoneNameID"
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    },
+    "Outputs": {
+        "LoadbalancerEndpoint": {
+            "Description": "The DNSName of the load balancer",
+            "Value": {
+                "Fn::GetAtt": [
+                    "ElasticLoadBalancer",
+                    "DNSName"
+                ]
+            }
+        }
+    }
+}

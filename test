@@ -1,0 +1,15 @@
+#!/bin/bash
+echo "Started at $(date -u +%Y-%m-%dT%H:%M:%S%z)"
+# Source the common script functions and Environment variables if present
+source functions
+# Set the trap and catch SIGNAL
+# See http://tldp.org/LDP/Bash-Beginners-Guide/html/sect_12_02.html
+trap cleanup EXIT
+# Test for prerequisites
+test_prerequisites
+# Create the stack in AWS
+create_stack
+# Watch Cloudformation stack progress 
+watch_stack_progress
+# Test endpoint for simple sanity check
+test_endpoint
