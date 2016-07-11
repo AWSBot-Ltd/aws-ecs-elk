@@ -7,17 +7,12 @@ DATE = $(shell date)
 
 all: docker install
 
-docker: build tag_latest push
+docker: build push
 
 build:
-	docker build -f elasticsearch/Dockerfile -t $(NAME)/elasticsearch:$(VERSION) .
-	docker build -f logstash/Dockerfile -t $(NAME)/logstash:$(VERSION) .
-	docker build -f kibana/Dockerfile -t $(NAME)/kibana:$(VERSION) .
-
-tag_latest:
-	docker tag -f $(NAME)/elasticsearch:$(VERSION) $(NAME):latest
-	docker tag -f $(NAME)/logstash:$(VERSION) $(NAME):latest
-	docker tag -f $(NAME)/kibana:$(VERSION) $(NAME):latest
+	$(MAKE) -C elasticsearch 
+	$(MAKE) -C logstash
+	$(MAKE) -C kibana 
 
 push:
 	docker push $(NAME)/elasticsearch:$(VERSION)
@@ -28,7 +23,10 @@ install:
 	@bash ./install
 
 clean:
-	@bash ./clean
+	-docker kill $(shell docker ps -a -q) 
+	-docker rm $(shell docker ps -a -q) 
+	-docker rmi --force $(shell docker images -q)
+	#@bash ./clean
 
 test:
 	@bash ./test
@@ -40,3 +38,5 @@ release:
 	git add --all; \
 	git commit -m "$$REPLY"; \
 	git push
+run:
+	docker-compose -p elk up -d --force-recreate

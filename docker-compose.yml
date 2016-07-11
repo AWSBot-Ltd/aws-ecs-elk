@@ -10,8 +10,7 @@ kibana:
   links:
     - elasticsearch
   ports:
-    - 80:80
-    - 443:443
+    - 5601:80
 
 logstash:
   image: dcrbsltd/logstash:5
