@@ -1,4 +1,4 @@
-FROM logstash:5
+FROM logstash:2.3.4-1
 MAINTAINER David Reay <david@dcrbsltd.com>
 
 # Add your logstash plugins setup here

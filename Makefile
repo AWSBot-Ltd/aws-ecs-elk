@@ -13,11 +13,13 @@ build:
 	$(MAKE) -C elasticsearch 
 	$(MAKE) -C logstash
 	$(MAKE) -C kibana 
+	$(MAKE) -C redis
 
 push:
 	docker push $(NAME)/elasticsearch:$(VERSION)
 	docker push $(NAME)/logstash:$(VERSION)
 	docker push $(NAME)/kibana:$(VERSION)
+	docker push $(NAME)/redis:$(VERSION)
 
 install:
 	@bash ./install

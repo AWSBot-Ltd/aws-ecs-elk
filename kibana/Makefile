@@ -1,6 +1,6 @@
 DATE = $(shell date)
 NAME = dcrbsltd/kibana
-VERSION ?= 5
+VERSION ?= 1
 CMD ?= bash
 .PHONY: test
 

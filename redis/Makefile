@@ -1,5 +1,5 @@
 DATE = $(shell date)
-NAME = dcrbsltd/elasticsearch
+NAME = dcrbsltd/redis
 VERSION ?= 1
 CMD ?= bash
 .PHONY: test
@@ -18,7 +18,7 @@ clean:
 	-docker rmi $(shell docker images -q)
 
 test:
-	@env NAME=$(NAME) VERSION=$(VERSION) ./test
+	@env NAME=$(NAME) TAG=$(TAG) VERSION=$(VERSION) ./test
 
 tag_latest:
 	-docker tag $(NAME):$(VERSION) $(NAME):latest

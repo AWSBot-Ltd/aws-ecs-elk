@@ -1,7 +1,7 @@
-# aws-ecs-elasticsearch
-[![Build Status](https://travis-ci.org/dcrbsltd/aws-ecs-elasticsearch.svg?branch=master)](https://travis-ci.org/dcrbsltd/aws-ecs-elasticsearch)
+# aws-ecs-elk
+[![Build Status](https://travis-ci.org/dcrbsltd/aws-ecs-elk.svg?branch=master)](https://travis-ci.org/dcrbsltd/aws-ecs-elasticsearch)
 
-A [Dockerized Elasticsearch](https://github.com/dockerfile/elasticsearch) cluster, orchestrated via Amazon Web Services [CloudFormation](http://www.cloudsarelies.com.s3-website-eu-west-1.amazonaws.com/).
+A Dockerized elk stack, orchestrated via Amazon Web Services [CloudFormation](http://www.cloudsarelies.com.s3-website-eu-west-1.amazonaws.com/).
 
 ## Prerequisites
 The scripts to run this CF template require
@@ -28,13 +28,13 @@ fill in the relavent details
   export AWS_DEFAULT_REGION=eu-west-1
 
   # DNS Domain name which is also used as the Stack name
-  export HOST=elasticsearch
+  export HOST=elk
   export DNS_DOMAIN=
 
-  export KEY_NAME=elasticsearch
+  export KEY_NAME=elk
 
   # The port on the endpoint to test
-  export PORT=9200
+  export PORT=5601
 
   # The VPC ID of the VPC
   export VPC_ID=
@@ -55,9 +55,3 @@ and and run the command
 ```
 or simply ```make```.
 
-## Configuring A Container
-For [configuring ecs](http://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-agent-config.html) to  output debug information, put
-```
-  ECS_LOGLEVEL=debug
-```
-in the ```/etc/ecs/ecs.config``` file, and restart the service (ecs-agent Docker containter).
